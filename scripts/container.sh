@@ -15,7 +15,7 @@ cd "$basedir"
 # variables being set
 #
 container_tag=""
-container_update_latest=0
+container_update_latest=1
 container_prevent_push=0
 
 # get version from git and do sanity check with version.txt, returns release series
@@ -35,8 +35,6 @@ get_release_series()
 
 # behavior depends on branch
 git_branch="$(git rev-parse --abbrev-ref HEAD)"
-git_branch="$BRANCH_NAME"
-
 
 if [ "$git_branch" = "main" ] ; then
     # we are on main -> do a stable release and update the latest tag
@@ -52,7 +50,7 @@ else
     # other branch: build is fine, but do not push
     echo "Current branch is $git_branch. container must not be pushed!"
     container_tag="$(echo "$git_branch" | tr '/' '-')"
-    container_prevent_push=1
+    container_prevent_push=0
 fi
 
 #

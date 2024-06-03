@@ -22,17 +22,6 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Get the current branch
-      id: vars
-      run: |
-        if [[ "${GITHUB_REF}" == refs/heads/* ]]; then
-          echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
-        elif [[ "${GITHUB_REF}" == refs/pull/*/merge ]]; then
-          echo "BRANCH_NAME=${GITHUB_HEAD_REF}" >> $GITHUB_ENV
-        else
-          echo "BRANCH_NAME=${GITHUB_REF}" >> $GITHUB_ENV
-        fi
-
     - name: Build container
       run: ./scripts/container.sh build
 
@@ -48,5 +37,3 @@ jobs:
 
     - name: Push container
       run: ./scripts/container.sh push
-      env:
-        BRANCH_NAME: ${{ env.BRANCH_NAME }}
