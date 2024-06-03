@@ -35,6 +35,8 @@ get_release_series()
 
 # behavior depends on branch
 git_branch="$(git rev-parse --abbrev-ref HEAD)"
+git_branch="$BRANCH_NAME"
+
 
 if [ "$git_branch" = "main" ] ; then
     # we are on main -> do a stable release and update the latest tag
