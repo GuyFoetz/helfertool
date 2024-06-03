@@ -5,7 +5,7 @@ set -eu
 #
 # settings and base directory
 #
-container_name="docker.io/helfertool/helfertool"
+container_name="docker.io/mullebutz/helfertool"
 
 basedir="$(dirname "$(dirname "$(readlink -f "$0")")")"
 cd "$basedir"
