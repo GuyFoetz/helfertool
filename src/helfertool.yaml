@@ -15,6 +15,9 @@ language:
     # Default language if not specified by the browser
     default: "de"
 
+    # Only provide the tool in the default language (removed the language selection)
+    singlelanguage: false
+
     # Language used for badges
     badges: "de"
 
@@ -117,8 +120,15 @@ authentication:
     #
     #    # LDAP schema and attributes
     #    schema:
-    #        # User definition
-    #        user_dn_template: "uid=%(user)s,ou=People,dc=helfertool,dc=org"
+    #        # User search - option 1: search for user based on attribute, bind then
+    #        user_search_base: "ou=People,dc=helfertool,dc=org"
+    #        user_search_filter: "(uid=%(user)s)"
+    #
+    #        # User search - option 2: direct bind
+    #        # If this option is enabled, the search is skipped
+    #        #user_dn_template: "uid=%(user)s,ou=People,dc=helfertool,dc=org"
+    #
+    #        # User attribute definition
     #        first_name_attr: "givenName"
     #        last_name_attr: "sn"
     #        email_attr: "mail"
@@ -157,6 +167,9 @@ authentication:
     #        # Client ID and secret
     #        client_id: "helfertool"
     #        client_secret: "<SECRET>"
+    #
+    #        # The requested scopes
+    #        scopes: "openid email profile"
     #
     #        # Controls the session cookie SameSite attribute, forcing it to "Lax". This is necessary if your OIDC provider
     #        # resides on a different top level domain name than the Helfertool (error message: "Login failed")
@@ -254,6 +267,14 @@ security:
 
     # Minimal password length (for local accounts)
     password_length: 12
+
+    # Enable captchas
+    captchas:
+        # for newsletter registration (recommended)
+        newsletter: true
+
+        # for event registration
+        registration: false
 
 # Helfertool features can be disabled globally here (true means enabled, false means disabled).
 # If a flag is changed to disabled, all events are modified automatically after a reload (of celery).

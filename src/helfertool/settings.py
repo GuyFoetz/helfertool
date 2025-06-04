@@ -14,6 +14,9 @@ from pathlib import Path
 
 from .utils import dict_get, build_path, get_version, pg_trgm_installed
 
+# import josepy, otherwise the oidc module does not work properly...
+import josepy
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # import configuration file
@@ -58,10 +61,21 @@ LANGUAGE_CODE = dict_get(config, "de", "language", "default")
 
 TIME_ZONE = dict_get(config, "Europe/Berlin", "language", "timezone")
 
-LANGUAGES = (
-    ("de", _("German")),
-    ("en", _("English")),
-)
+LANGUAGE_SINGLELANGUAGE = dict_get(config, False, "language", "singlelanguage")
+
+if LANGUAGE_SINGLELANGUAGE:
+    if LANGUAGE_CODE == "de":
+        LANGUAGES = (("de", _("German")),)
+    elif LANGUAGE_CODE == "en":
+        LANGUAGES = (("en", _("English")),)
+    else:
+        print("Invalid language: {}".format(LANGUAGE_CODE))
+        sys.exit(1)
+else:
+    LANGUAGES = (
+        ("de", _("German")),
+        ("en", _("English")),
+    )
 
 USE_I18N = True
 USE_TZ = True
@@ -96,6 +110,7 @@ CELERY_BROKER_URL = "amqp://{}:{}@{}:{}/{}".format(
     dict_get(config, "", "rabbitmq", "vhost"),
 )
 CELERY_RESULT_BACKEND = "django-db"
+CELERY_RESULT_EXTENDED = True
 CELERY_BROKER_POOL_LIMIT = None
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
@@ -189,8 +204,19 @@ if ldap_config:
     AUTH_LDAP_BIND_DN = dict_get(ldap_config, None, "server", "bind_dn")
     AUTH_LDAP_BIND_PASSWORD = dict_get(ldap_config, None, "server", "bind_password")
 
-    # user schema
+    # user search
+    user_search_base = dict_get(ldap_config, None, "schema", "user_search_base")
+    user_search_filter = dict_get(ldap_config, None, "schema", "user_search_filter")
+    if user_search_base is not None and user_search_filter is not None:
+        AUTH_LDAP_USER_SEARCH = django_auth_ldap.config.LDAPSearch(
+            user_search_base,
+            ldap.SCOPE_SUBTREE,  # pylint: disable=E1101
+            user_search_filter,
+        )
+
     AUTH_LDAP_USER_DN_TEMPLATE = dict_get(ldap_config, None, "schema", "user_dn_template")
+
+    # user schema
     AUTH_LDAP_USER_ATTR_MAP = {
         "first_name": dict_get(ldap_config, "givenName", "schema", "first_name_attr"),
         "last_name": dict_get(ldap_config, "sn", "schema", "last_name_attr"),
@@ -240,7 +266,7 @@ if oidc_config:
     OIDC_OP_TOKEN_ENDPOINT = dict_get(oidc_config, None, "provider", "token_endpoint")
     OIDC_OP_USER_ENDPOINT = dict_get(oidc_config, None, "provider", "user_endpoint")
 
-    OIDC_RP_SCOPES = "openid email profile"  # also ask for profile -> given_name and family_name
+    OIDC_RP_SCOPES = dict_get(oidc_config, "openid email profile", "provider", "scopes")
 
     oidc_renew_check_interval = dict_get(oidc_config, 0, "provider", "renew_check_interval")
     if oidc_renew_check_interval > 0:
@@ -301,7 +327,7 @@ AXES_LOCKOUT_PARAMETERS = ["username"]
 AXES_LOCK_OUT_AT_FAILURE = True
 
 AXES_FAILURE_LIMIT = dict_get(config, 5, "security", "lockout", "limit")
-AXES_COOLOFF_TIME = timedelta(minutes=dict_get(config, 10, "security", "lockout", "time"))
+AXES_COOLOFF_TIME = lambda request: timedelta(minutes=dict_get(config, 10, "security", "lockout", "time"))
 
 AXES_LOCKOUT_TEMPLATE = "helfertool/login_banned.html"
 AXES_DISABLE_ACCESS_LOG = True
@@ -312,6 +338,9 @@ if OIDC_CUSTOM_PROVIDER_NAME is not None:
 DEBUG = dict_get(config, False, "security", "debug")
 SECRET_KEY = dict_get(config, "CHANGEME", "security", "secret")
 ALLOWED_HOSTS = dict_get(config, [], "security", "allowed_hosts") or []  # empty list in config is None, but we need []
+
+CAPTCHAS_NEWSLETTER = dict_get(config, False, "security", "captchas", "newsletter")
+CAPTCHAS_REGISTRATION = dict_get(config, False, "security", "captchas", "registration")
 
 # use X-Forwarded-Proto header to determine if https is used (overwritten in settings_container.py)
 if dict_get(config, False, "security", "behind_proxy"):
@@ -536,6 +565,12 @@ DJANGO_ICONS = {
     },
 }
 
+# django-simple-captcha
+CAPTCHA_FONT_SIZE = 30
+CAPTCHA_IMAGE_SIZE = (120, 50)
+CAPTCHA_LETTER_ROTATION = (-30, 30)
+CAPTCHA_FOREGROUND_COLOR = "#1ea082"
+
 # application definition
 INSTALLED_APPS = (
     "helfertool",  # we override some default translations here, so put it first
@@ -552,6 +587,7 @@ INSTALLED_APPS = (
     "django_icons",
     "django_select2",
     "django_countries",
+    "captcha",
     "ckeditor",
     "compressor",
     "django_celery_results",
