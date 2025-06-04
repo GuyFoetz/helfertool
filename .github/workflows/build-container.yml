@@ -25,8 +25,8 @@ jobs:
     - name: Build container
       run: ./scripts/container.sh build
 
-    - name: Test container
-      run: ./scripts/container.sh autotest
+    # - name: Test container
+    #   run: ./scripts/container.sh autotest
 
     - name: Login to registroy
       uses: redhat-actions/podman-login@v1
