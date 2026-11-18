@@ -1,4 +1,4 @@
-![Helfertool](https://raw.githubusercontent.com/helfertool/graphics/master/logo/logo_with_text.png)
+![Helfertool](https://raw.githubusercontent.com/helfertool/graphics/main/logo/logo_with_text_green.png)
 
 Helfertool is a Python3 and Django based tool that allows to manage the
 volunteers or staff for an event. See <https://www.helfertool.org> for more information.
@@ -26,7 +26,7 @@ Please feel free to create issues here in Github!
 
 # License
 
-Copyright (C) 2015-2025  Sven Hertle and contributors
+Copyright (C) 2015-2026  Sven Hertle and contributors
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as

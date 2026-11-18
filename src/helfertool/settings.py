@@ -14,9 +14,6 @@ from pathlib import Path
 
 from .utils import dict_get, build_path, get_version, pg_trgm_installed
 
-# import josepy, otherwise the oidc module does not work properly...
-import josepy
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # import configuration file
@@ -79,8 +76,6 @@ else:
 
 USE_I18N = True
 USE_TZ = True
-
-DEFAULT_COUNTRY = dict_get(config, "DE", "language", "country")
 
 # database
 DATABASES = {
@@ -176,6 +171,7 @@ EMAIL_SENDER_ADDRESS = dict_get(config, "helfertool@localhost", "mail", "sender_
 EMAIL_SENDER_NAME = dict_get(config, EMAIL_SENDER_ADDRESS, "mail", "sender_name")
 
 SERVER_EMAIL = EMAIL_SENDER_ADDRESS  # for error messages
+DEFAULT_FROM_EMAIL = EMAIL_SENDER_ADDRESS  # for other messages, like password resets
 
 # forward mails that were not handled automatically to this address
 # the display name defaults to the mail address
@@ -190,6 +186,8 @@ MAIL_BATCH_GAP = dict_get(config, 5, "mail", "batch_gap")
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/manage/account/check/"
 LOGOUT_REDIRECT_URL = "/"
+
+PASSWORD_RESET_TIMEOUT = 1800  # 30 minutes
 
 LOCAL_USER_CHAR = dict_get(config, None, "authentication", "local_user_char")
 
@@ -262,27 +260,32 @@ if oidc_config:
     OIDC_RP_CLIENT_ID = dict_get(oidc_config, None, "provider", "client_id")
     OIDC_RP_CLIENT_SECRET = dict_get(oidc_config, None, "provider", "client_secret")
 
+    OIDC_USE_PKCE = dict_get(oidc_config, None, "provider", "pkce")
+    OIDC_PKCE_CODE_CHALLENGE_METHOD = dict_get(oidc_config, "S256", "provider", "pkce_code_challenge")
+
     OIDC_OP_AUTHORIZATION_ENDPOINT = dict_get(oidc_config, None, "provider", "authorization_endpoint")
     OIDC_OP_TOKEN_ENDPOINT = dict_get(oidc_config, None, "provider", "token_endpoint")
     OIDC_OP_USER_ENDPOINT = dict_get(oidc_config, None, "provider", "user_endpoint")
 
     OIDC_RP_SCOPES = dict_get(oidc_config, "openid email profile", "provider", "scopes")
 
+    OIDC_CUSTOM_USERNAME_CLAIM = dict_get(oidc_config, "email", "provider", "username_claim")
+
     oidc_renew_check_interval = dict_get(oidc_config, 0, "provider", "renew_check_interval")
     if oidc_renew_check_interval > 0:
         OIDC_RENEW_ID_TOKEN_EXPIRY_SECONDS = oidc_renew_check_interval * 60
 
-    # username is mail address
-    OIDC_USERNAME_ALGO = "helfertool.oidc.generate_username"
-
     # login and logout
     LOGIN_REDIRECT_URL_FAILURE = "/oidc/failed"
-    ALLOW_LOGOUT_GET_METHOD = True
+
+    # store id token so that we can use it for the logout endpoint
+    OIDC_STORE_ID_TOKEN = True
 
     oidc_logout = dict_get(oidc_config, None, "provider", "logout")
     if oidc_logout:
         OIDC_CUSTOM_LOGOUT_ENDPOINT = dict_get(oidc_logout, None, "endpoint")
-        OIDC_CUSTOM_LOGOUT_REDIRECT_PARAMTER = dict_get(oidc_logout, None, "redirect_parameter")
+        OIDC_CUSTOM_LOGOUT_REDIRECT_PARAMTER = dict_get(oidc_logout, "post_logout_redirect_uri", "redirect_parameter")
+        OIDC_CUSTOM_LOGOUT_ID_TOKEN_HINT = dict_get(oidc_logout, True, "id_token_hint")
 
         OIDC_OP_LOGOUT_URL_METHOD = "helfertool.oidc.custom_oidc_logout"
 
@@ -323,7 +326,11 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # axes: user lockout based on username, not IP or user agent
-AXES_LOCKOUT_PARAMETERS = ["username"]
+# if we remove the ip_address, axes complains... so we have both now
+AXES_LOCKOUT_PARAMETERS = [
+    ["username"],
+    ["username", "ip_address"],
+]
 AXES_LOCK_OUT_AT_FAILURE = True
 
 AXES_FAILURE_LIMIT = dict_get(config, 5, "security", "lockout", "limit")
@@ -339,7 +346,8 @@ DEBUG = dict_get(config, False, "security", "debug")
 SECRET_KEY = dict_get(config, "CHANGEME", "security", "secret")
 ALLOWED_HOSTS = dict_get(config, [], "security", "allowed_hosts") or []  # empty list in config is None, but we need []
 
-CAPTCHAS_NEWSLETTER = dict_get(config, False, "security", "captchas", "newsletter")
+CAPTCHAS_NEWSLETTER = dict_get(config, True, "security", "captchas", "newsletter")
+CAPTCHAS_PASSWORD_RESET = dict_get(config, True, "security", "captchas", "password_reset")
 CAPTCHAS_REGISTRATION = dict_get(config, False, "security", "captchas", "registration")
 
 # use X-Forwarded-Proto header to determine if https is used (overwritten in settings_container.py)
@@ -366,11 +374,7 @@ CSRF_COOKIE_SAMESITE = "Strict"
 
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 SESSION_COOKIE_HTTPONLY = True
-# OIDC with foreign TLDs is blocked by SAMESITE=Strict, so make this configurable
-if oidc_config and dict_get(oidc_config, False, "provider", "thirdparty_domain"):
-    SESSION_COOKIE_SAMESITE = "Lax"
-else:
-    SESSION_COOKIE_SAMESITE = "Strict"
+SESSION_COOKIE_SAMESITE = "Lax"
 
 if not DEBUG:
     CSRF_COOKIE_SECURE = True
@@ -412,7 +416,7 @@ LOGGING = {
         "helfertool_database": {
             "class": "toollog.handlers.DatabaseHandler",
             "level": "INFO",
-        }
+        },
         # syslog handlers are added dynamically below
     },
     "loggers": {
@@ -454,7 +458,6 @@ FEATURES_BADGES = bool(dict_get(config, True, "features", "badges"))
 FEATURES_GIFTS = bool(dict_get(config, True, "features", "gifts"))
 FEATURES_PREREQUISITES = bool(dict_get(config, True, "features", "prerequisites"))
 FEATURES_INVENTORY = bool(dict_get(config, True, "features", "inventory"))
-FEATURES_CORONA = bool(dict_get(config, True, "features", "corona"))
 
 # Display Options
 # Maximum years of events to be displayed by default on the main page
@@ -495,6 +498,7 @@ BADGE_PDFLATEX = dict_get(config, "/usr/bin/pdflatex", "badges", "pdflatex")
 BADGE_PHOTO_MAX_SIZE = dict_get(config, 1000, "badges", "photo_max_size")
 BADGE_SPECIAL_MAX = dict_get(config, 50, "badges", "special_badges_max")
 
+BADGE_BUILD_TIMEOUT = 60 * dict_get(config, 5, "badges", "build_timeout")
 BADGE_PDF_TIMEOUT = 60 * dict_get(config, 30, "badges", "pdf_timeout")
 BADGE_RM_DELAY = 60 * dict_get(config, 2, "badges", "rm_delay")
 
@@ -511,7 +515,15 @@ else:
 BADGE_LANGUAGE_CODE = dict_get(config, "de", "language", "badges")
 
 # newsletter
-NEWS_SUBSCRIBE_DEADLINE = dict_get(config, 3, "subscribe_deadline", "newsletter")
+NEWS_SUBSCRIBE_DEADLINE = dict_get(config, 3, "newsletter", "subscribe_deadline")
+
+# automation
+AUTOMATION_EVENTS_ARCHIVE_DEADLINE = dict_get(config, None, "automation", "event_archive", "deadline")  # months
+AUTOMATION_EVENTS_ARCHIVE_INTERVAL = dict_get(config, None, "automation", "event_archive", "interval")  # days
+AUTOMATION_EVENTS_ARCHIVE_START_BEFORE_DEADLINE = dict_get(
+    config, 0, "automation", "event_archive", "start_before_deadline"
+)  # days
+AUTOMATION_EVENTS_ARCHIVE_DOCS = dict_get(config, None, "automation", "event_archive", "docs")
 
 # internal group names
 GROUP_ADDUSER = "registration_adduser"
@@ -521,35 +533,6 @@ GROUP_SENDNEWS = "registration_sendnews"
 # Bootstrap config
 BOOTSTRAP5 = {
     "required_css_class": "required-form",
-}
-
-# HTML sanitization for text fields
-BLEACH_ALLOWED_TAGS = ["p", "b", "i", "u", "em", "strong", "a", "br", "ul", "ol", "li"]
-BLEACH_ALLOWED_ATTRIBUTES = [
-    "href",
-]
-BLEACH_ALLOWED_STYLES = []
-BLEACH_STRIP_TAGS = True
-
-# editor for text fields
-CKEDITOR_CONFIGS = {
-    "default": {
-        "toolbar": "Custom",
-        "toolbar_Custom": [
-            ["Bold", "Italic", "Underline"],
-            [
-                "NumberedList",
-                "BulletedList",
-                "-",
-            ],
-            ["Link", "Unlink"],
-            ["Source"],
-        ],
-        # we want to have a responsive ckeditor:
-        # 1. set width for editor itself here
-        # 2. set width also vor div.django-ckeditor-widget via custom CSS
-        "width": "100%",
-    }
 }
 
 # django-select2 config
@@ -586,9 +569,8 @@ INSTALLED_APPS = (
     "django_bootstrap5",
     "django_icons",
     "django_select2",
-    "django_countries",
+    "django_prose_editor",
     "captcha",
-    "ckeditor",
     "compressor",
     "django_celery_results",
     "registration.apps.RegistrationConfig",
@@ -603,7 +585,7 @@ INSTALLED_APPS = (
     "toolsettings.apps.ToolsettingsConfig",
     "prerequisites.apps.PrerequisitesConfig",
     "toollog.apps.ToollogConfig",
-    "corona.apps.CoronaConfig",
+    "adminautomation.apps.AdminautomationConfig",
 )
 
 # middleware

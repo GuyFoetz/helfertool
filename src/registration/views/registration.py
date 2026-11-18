@@ -1,13 +1,13 @@
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 
-from corona.forms import ContactTracingDataForm
 from helfertool.utils import nopermission
 from news.helper import news_validate_helper
 
@@ -32,51 +32,58 @@ def index_all_events(request):
 def index(request, filter_old_events=True):
     events = Event.objects.all()
 
-    # public events
-    active_events = [e for e in events if e.active]
-    active_events = sorted(active_events, key=lambda e: e.date)
+    # public events, sorted by date
+    active_events = sorted([e for e in events if e.active], key=lambda e: e.date)
 
     # only one public event and it is active -> redirect
     if events.count() == 1 and active_events:
         return redirect("form", event_url_name=active_events[0].url_name)
 
-    # inactive events that are visible for current user
-    involved_events = []
+    # if user is authenticated, mark events as involved or not involved
+    # usually, we should use has_access to verify access. but this is too slow for many events with many jobs
+    # so we do it manually here...
+    inactive_events_by_year = []
     enable_show_more_events = False
     if not request.user.is_anonymous:
-        # first get all involved events
-        all_involved_events = []
-        for event in events:
-            event.involved = has_access(request.user, event, ACCESS_INVOLVED)
+        # get all involved events based on role assignments
+        # add the "involved" flag - it will be used by the template
+        all_involved_events = Event.objects.filter(Q(admins=request.user) | Q(job__job_admins=request.user)).distinct()
+        for e in events:
+            e.involved = request.user.is_superuser or e in all_involved_events
 
-            if event.involved and not event.active:
-                all_involved_events.append(event)
+        # get all events, that should be listed in the inactive section
+        # if we are superuser, thats all inactive events. otherwise, only the involved, inactive ones
+        if request.user.is_superuser:
+            inactive_events = events.filter(active=False)
+        else:
+            inactive_events = all_involved_events.filter(active=False)
 
         # and then optionally cut away the old ones
         if filter_old_events:
+            inactive_events_last_years = []
             oldest_year = datetime.datetime.now().year - settings.EVENTS_LAST_YEARS
-            for event in all_involved_events:
+            for event in inactive_events:
                 if event.date.year >= oldest_year:
-                    involved_events.append(event)
+                    inactive_events_last_years.append(event)
                 else:
                     # we skip an event, so we need a button to show it
                     enable_show_more_events = True
-        else:
-            involved_events = all_involved_events
 
-    # group involved_events by date
-    # first, sort descending by date
-    involved_events_sorted = sorted(involved_events, key=lambda e: e.date, reverse=True)
-    # then group by year
-    involved_events_grouped = groupby(involved_events_sorted, key=lambda e: e.date.year)
-    # then convert to data structure that django templates understand and sort by name
-    involved_events_by_year = OrderedDict()
-    for year, events in involved_events_grouped:
-        involved_events_by_year[year] = list(sorted(events, key=lambda e: e.name.lower()))
+            inactive_events = inactive_events_last_years
+
+        # group inactive_events by date
+        # first, sort descending by date
+        inactive_events_sorted = sorted(inactive_events, key=lambda e: e.date, reverse=True)
+        # then group by year
+        inactive_events_grouped = groupby(inactive_events_sorted, key=lambda e: e.date.year)
+        # then convert to data structure that django templates understand and sort by name
+        inactive_events_by_year = OrderedDict()
+        for year, events in inactive_events_grouped:
+            inactive_events_by_year[year] = list(sorted(events, key=lambda e: e.name.lower()))
 
     context = {
         "active_events": active_events,
-        "involved_events_by_year": involved_events_by_year,
+        "inactive_events_by_year": inactive_events_by_year,
         "enable_show_more_events": enable_show_more_events,
     }
     return render(request, "registration/index.html", context)
@@ -117,16 +124,8 @@ def form(request, event_url_name, link_pk=None):
     # handle form
     form = RegisterForm(request.POST or None, event=event, shifts_qs=shifts_qs, is_link=link is not None)
 
-    if event.corona:
-        corona_form = ContactTracingDataForm(request.POST or None, event=event, prefix="corona")
-    else:
-        corona_form = None
-
-    if form.is_valid() and (corona_form is None or corona_form.is_valid()):
+    if form.is_valid():
         helper = form.save()
-
-        if corona_form:
-            corona_form.save(helper=helper)
 
         logger.info(
             "helper registered",
@@ -145,7 +144,6 @@ def form(request, event_url_name, link_pk=None):
     context = {
         "event": event,
         "form": form,
-        "corona_form": corona_form,
         "user_is_involved": user_is_involved,
         "link": link,
     }
@@ -161,12 +159,11 @@ def registered(request, event_url_name, helper_pk=None):
 
 
 @never_cache
-def validate(request, event_url_name, helper_pk, validation_id=None):
+def validate(request, event_url_name, helper_pk, validation_id):
     event, job, shift, helper = get_or_404(event_url_name, helper_pk=helper_pk, handle_duplicates=True)
 
     # the validation_id should prevent that users guess the url of this page
-    # for now, we accept links without this ID, but future releases will require it
-    if validation_id and helper.validation_id != validation_id:
+    if helper.validation_id != validation_id:
         raise Http404
 
     if not helper.validated:
@@ -237,18 +234,8 @@ def update_personal(request, event_url_name, helper_pk):
 
     form = HelperForm(request.POST or None, instance=helper, event=event, public=True, mask_sensitive=True)
 
-    if event.corona:
-        corona_form = ContactTracingDataForm(
-            request.POST or None, instance=helper.contacttracingdata, event=event, prefix="corona"
-        )
-    else:
-        corona_form = None
-
-    if form.is_valid() and (corona_form is None or corona_form.is_valid()):
+    if form.is_valid():
         form.save()
-
-        if corona_form:
-            corona_form.save(helper=helper)
 
         logger.info(
             "helper dataupdated",
@@ -264,5 +251,5 @@ def update_personal(request, event_url_name, helper_pk):
 
         return redirect("registered", event_url_name=event.url_name, helper_pk=helper.pk)
 
-    context = {"event": event, "data": helper, "personal_data_form": form, "corona_form": corona_form}
+    context = {"event": event, "data": helper, "personal_data_form": form}
     return render(request, "registration/registered.html", context)

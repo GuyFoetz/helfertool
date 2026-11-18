@@ -1,16 +1,18 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.mail import EmailMessage
 from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.db.models.signals import pre_save, post_save, post_delete
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
-from django_bleach.models import BleachField
 from multiselectfield import MultiSelectField
 
+from django_prose_editor.fields import ProseEditorField
+from helfertool.utils import PROSE_EDITOR_DEFAULT_EXTENSIONS
+
 from badges.models import BadgeSettings, BadgeDefaults, Badge
-from corona.models import CoronaSettings
 from gifts.models import HelpersGifts
 from gifts.models.giftsettings import GiftSettings
 from helfertool.forms import RestrictedImageField
@@ -21,6 +23,7 @@ import os
 import posixpath
 import shutil
 import uuid
+from smtplib import SMTPException
 
 
 def _default_mail():
@@ -146,19 +149,25 @@ class Event(models.Model):
         validators=[MinValueValidator(0)],
     )
 
-    text = BleachField(
+    text = ProseEditorField(
+        extensions=PROSE_EDITOR_DEFAULT_EXTENSIONS,
+        sanitize=True,
         blank=True,
         verbose_name=_("Text before registration"),
         help_text=_("Displayed as first text of the registration form."),
     )
 
-    imprint = BleachField(
+    imprint = ProseEditorField(
+        extensions=PROSE_EDITOR_DEFAULT_EXTENSIONS,
+        sanitize=True,
         blank=True,
         verbose_name=_("Contact"),
         help_text=_("Displayed at the bottom of all pages for the event."),
     )
 
-    registered = BleachField(
+    registered = ProseEditorField(
+        extensions=PROSE_EDITOR_DEFAULT_EXTENSIONS,
+        sanitize=True,
         blank=True,
         verbose_name=_("Text after registration"),
         help_text=_("Displayed after registration."),
@@ -215,18 +224,23 @@ class Event(models.Model):
         blank=True,
     )
 
+    ask_mxid = models.BooleanField(
+        default=False,
+        verbose_name=_("Ask for Matrix ID"),
+    )
+
     ask_phone = models.BooleanField(
-        default=True,
+        default=False,
         verbose_name=_("Ask for phone number"),
     )
 
     ask_shirt = models.BooleanField(
-        default=True,
+        default=False,
         verbose_name=_("Ask for T-shirt size"),
     )
 
     ask_nutrition = models.BooleanField(
-        default=True,
+        default=False,
         verbose_name=_("Ask for preferred nutrition"),
     )
 
@@ -260,11 +274,6 @@ class Event(models.Model):
     prerequisites = models.BooleanField(
         default=False,
         verbose_name=_("Manage prerequisites for helpers"),
-    )
-
-    corona = models.BooleanField(
-        default=False,
-        verbose_name=_("Collect additional data for COVID-19 contact tracing"),
     )
 
     archived = models.BooleanField(
@@ -327,6 +336,38 @@ class Event(models.Model):
             self.logo_social = logo_social_original
             self.save(update_fields=["logo", "logo_social"])
 
+    def send_admin_mail(self, subject, text):
+        """Send a mail to the admins of the event.
+
+        Returns true on success, false on error."""
+        # get admins
+        from .adminroles import EventAdminRoles
+
+        recipients = EventAdminRoles.objects.filter(event=self, roles__contains=EventAdminRoles.ROLE_ADMIN).values_list(
+            "user__email", flat=True
+        )
+        recipients = list(filter(lambda e: e != "", recipients))
+
+        # add the main event address
+        recipients.append(self.email)
+
+        # send mail
+        mail = EmailMessage(
+            subject,
+            text,
+            settings.EMAIL_SENDER_ADDRESS,
+            recipients,
+            reply_to=[
+                settings.EMAIL_SENDER_ADDRESS,
+            ],
+        )
+
+        try:
+            mail.send(fail_silently=False)
+            return True
+        except (SMTPException, ConnectionError) as e:
+            return False
+
     def get_shirt_choices(self, internal=True):
         """
         Return the valid shirt sizes in the correct format for a field's choices parameter.
@@ -363,13 +404,6 @@ class Event(models.Model):
             return None
 
     @property
-    def corona_settings(self):
-        try:
-            return self.coronasettings
-        except AttributeError:
-            return None
-
-    @property
     def all_coordinators(self):
         return self.helper_set.filter(job__isnull=False).distinct()
 
@@ -399,7 +433,6 @@ class Event(models.Model):
             ["FEATURES_GIFTS", "gifts"],
             ["FEATURES_PREREQUISITES", "prerequisites"],
             ["FEATURES_INVENTORY", "inventory"],
-            ["FEATURES_CORONA", "corona"],
         ]
 
         for flag in flags:
@@ -460,13 +493,6 @@ class Event(models.Model):
         if not self.inventory_settings:
             InventorySettings.objects.create(event=self)
 
-    def _setup_corona_settings(self):
-        """
-        Setup corona settings for the event (called from post_save handler).
-        """
-        if not self.corona_settings:
-            CoronaSettings.objects.create(event=self)
-
 
 @receiver(pre_save, sender=Event, dispatch_uid="pre_event_saved")
 def pre_event_saved(sender, instance, using, **kwargs):
@@ -485,9 +511,6 @@ def post_event_saved(sender, instance, using, **kwargs):
 
     if instance.inventory:
         instance._setup_inventory_settings()
-
-    if instance.corona:
-        instance._setup_corona_settings()
 
 
 @receiver(post_delete, sender=Event, dispatch_uid="event_deleted")

@@ -12,7 +12,6 @@ from toollog.models import LogEntry
 
 from ..models import Event, EventAdminRoles, EventArchive
 
-from ckeditor.widgets import CKEditorWidget
 from copy import deepcopy
 
 import os
@@ -30,20 +29,11 @@ class EventForm(forms.ModelForm):
             "archived",
         ]
         widgets = {
-            "text": CKEditorWidget,
             "date": DatePicker,
             "changes_until": DatePicker,
             "logo": ImageFileInput,
             "logo_social": ImageFileInput,
         }
-
-        # According to the documentation django-modeltranslations copies the
-        # widget from the original field.
-        # But when setting BLEACH_DEFAULT_WIDGET this does not happen.
-        # Therefore set it manually...
-        for w in ("text", "imprint", "registered"):
-            for lang, name in settings.LANGUAGES:
-                widgets["{}_{}".format(w, lang)] = CKEditorWidget()
 
     def __init__(self, *args, **kwargs):
         super(EventForm, self).__init__(*args, **kwargs)
@@ -57,6 +47,9 @@ class EventForm(forms.ModelForm):
         if not self.instance.ask_shirt and "shirt_sizes" in self.fields:
             # 'shirt_sizes' is not in fields for EventDuplicateForm
             self.fields.pop("shirt_sizes")
+            self.fields["ask_shirt"].help_text = _(
+                "T-shirt sizes can be edited after enabling this option and saving the event."
+            )
 
         # remove flags for disabled features
         if not settings.FEATURES_NEWSLETTER and "ask_news" in self.fields:
@@ -69,10 +62,8 @@ class EventForm(forms.ModelForm):
             self.fields.pop("prerequisites")
         if not settings.FEATURES_INVENTORY and "inventory" in self.fields:
             self.fields.pop("inventory")
-        if not settings.FEATURES_CORONA and "corona" in self.fields:
-            self.fields.pop("corona")
 
-        # change labels of ckeditor fields: We only want to have the language name as label
+        # change labels of editor fields: We only want to have the language name as label
         # everything else is in the template.
         for field in ("text", "imprint", "registered"):
             for lang, name in settings.LANGUAGES:
@@ -235,12 +226,10 @@ class EventDuplicateForm(EventForm):
         activate_gifts = self.instance.gifts
         activate_prerequisites = self.instance.prerequisites
         activate_inventory = self.instance.inventory
-        activate_corona = self.instance.corona
         self.instance.badges = False
         self.instance.gifts = False
         self.instance.prerequisites = False
         self.instance.inventory = False
-        self.instance.corona = False
 
         super(EventDuplicateForm, self).save(commit=True)  # we have to save
 
@@ -273,7 +262,6 @@ class EventDuplicateForm(EventForm):
         # copy other features
         self._duplicate_badges(activate_badges)
         self._duplicate_inventory(activate_inventory)
-        self._duplicate_corona(activate_corona)
 
     def _duplicate_gifts(self, activate):
         # gifts
@@ -329,13 +317,6 @@ class EventDuplicateForm(EventForm):
         self.instance.inventory = activate
         self.instance.save()
 
-    def _duplicate_corona(self, activate):
-        if self.other_event.corona_settings:
-            self.other_event.corona_settings.duplicate(self.instance)
-
-        self.instance.corona = activate
-        self.instance.save()
-
 
 class EventMoveForm(forms.ModelForm):
     class Meta:
@@ -368,10 +349,3 @@ class EventMoveForm(forms.ModelForm):
             self.instance.save()
 
         return self.instance
-
-
-class PastEventForm(forms.Form):
-    months = forms.IntegerField(
-        min_value=0,
-        label=_("Months"),
-    )

@@ -12,7 +12,6 @@ urlpatterns = [
     # admin interface
     path("manage/", views.admin, name="admin"),
     path("manage/new/", views.edit_event, name="new_event"),
-    path("manage/past/", views.past_events, name="past_events"),
     # registration
     path("<slug:event_url_name>/", views.form, name="form"),
     path(
@@ -24,11 +23,6 @@ urlpatterns = [
         "<slug:event_url_name>/validate/<uuid:helper_pk>/<uuid:validation_id>/",
         views.validate,
         name="validate",
-    ),
-    path(
-        "<slug:event_url_name>/validate/<uuid:helper_pk>/",
-        views.validate,
-        name="validate_old",
     ),
     path("<slug:event_url_name>/ical/<uuid:helper_pk>/", HelperFeed(), name="ical"),
     path(
