@@ -21,6 +21,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0  # full history and tags, needed by git describe in container.sh
 
     - name: Build container
       run: ./scripts/container.sh build
